@@ -1,23 +1,17 @@
-<!DOCTYPE html>
+<!DOCTYPE html><!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Our Sanctuary</title>
-    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
     <div id="root"></div>
-    <!-- This points to your main logic file -->
-    <script type="module">
-      import React from 'react';
-      import ReactDOM from 'react-dom/client';
-      import App from './chat.jsx';
-
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(React.createElement(App));
-    </script>
+    <!-- 
+      FIXED: This now points exactly to your file in the src folder.
+      Do not rename this to App.js on GitHub; keep it as gemini_chat.jsx
+    -->
+    <script type="module" src="./chat.jsx"></script>
   </body>
-
 </html>
