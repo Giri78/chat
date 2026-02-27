@@ -45,7 +45,7 @@ const db = getFirestore(app);
  * Change this string to something completely random and secret.
  * Anyone with this ID can technically see the messages.
  */
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'sanctuary-private-link-9823741-alpha-omega-forever';
+const appId = typeof __app_id !== 'undefined' ? __app_id : '78-qwerty-Giridhar';
 const apiKey = ""; 
 
 const App = () => {
@@ -454,5 +454,6 @@ const App = () => {
     </div>
   );
 };
+
 
 export default App;
