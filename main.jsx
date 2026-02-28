@@ -16,7 +16,7 @@ import {
   query 
 } from 'firebase/firestore';
 import { 
-  Send, Heart, Loader2, Video, AlertCircle, X 
+  Send, Heart, Loader2, AlertCircle, Sparkles, Wand2, CalendarHeart, MessageCircleHeart, RefreshCw
 } from 'lucide-react';
 
 // --- Configuration Discovery ---
@@ -25,22 +25,23 @@ const getFirebaseConfig = () => {
     try { return JSON.parse(__firebase_config); } catch(e) { return null; }
   }
   try {
-    const viteConfig = import.meta.env.VITE_FIREBASE_CONFIG;
-    if (viteConfig) return JSON.parse(viteConfig);
+    const config = (import.meta.env && import.meta.env.VITE_FIREBASE_CONFIG) || 
+                   (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_CONFIG);
+    if (config) return JSON.parse(config);
   } catch (e) {}
   return null;
 };
 
 const config = getFirebaseConfig();
-let app, auth, db;
+const geminiApiKey = ""; // Provided at runtime
 
+let app, auth, db;
 if (config && config.apiKey) {
   app = getApps().length === 0 ? initializeApp(config) : getApps()[0];
   auth = getAuth(app);
   db = getFirestore(app);
 }
 
-// Ensure the appId is consistent across environments
 const rawAppId = typeof __app_id !== 'undefined' ? __app_id : '78-qwerty-Giridhar';
 const appId = rawAppId.replace(/\//g, '_');
 
@@ -49,7 +50,89 @@ const App = () => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [error, setError] = useState(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [showAiMenu, setShowAiMenu] = useState(false);
   const scrollRef = useRef(null);
+
+  // --- Gemini API with Exponential Backoff ---
+  const callGemini = async (prompt, systemInstruction = "") => {
+    const maxRetries = 5;
+    let delay = 1000;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              systemInstruction: { parts: [{ text: systemInstruction }] }
+            })
+          }
+        );
+
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        
+        const result = await response.json();
+        return result.candidates?.[0]?.content?.parts?.[0]?.text;
+      } catch (err) {
+        if (i === maxRetries - 1) throw err;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
+  };
+
+  const handleSweetify = async () => {
+    if (!inputValue.trim()) return;
+    setIsAiLoading(true);
+    try {
+      const result = await callGemini(
+        `Rewrite this message for my partner to be deeply romantic, poetic, and heartwarming: "${inputValue}"`,
+        "You are a romantic poet. Keep the meaning of the user's message but transform it into a beautiful, safe, and sincere expression of love."
+      );
+      if (result) setInputValue(result.trim());
+    } catch (err) {
+      setError("The AI is a bit shy right now. Please try again in a moment.");
+    } finally {
+      setIsAiLoading(false);
+      setShowAiMenu(false);
+    }
+  };
+
+  const handleDateIdea = async () => {
+    setIsAiLoading(true);
+    try {
+      const result = await callGemini(
+        "Give me 3 unique, cozy, and creative date night ideas for a couple who loves their private sanctuary. Format it as a sweet message.",
+        "You are a thoughtful relationship coach. Suggest intimate and safe date ideas."
+      );
+      if (result) await sendMessage(`✨ AI Date Suggestion:\n\n${result}`);
+    } catch (err) {
+      setError("AI couldn't think of a date idea right now.");
+    } finally {
+      setIsAiLoading(false);
+      setShowAiMenu(false);
+    }
+  };
+
+  const handleSparkConversation = async () => {
+    setIsAiLoading(true);
+    try {
+      const result = await callGemini(
+        "Generate one deep, meaningful conversation starter for a couple to get to know each other's souls better.",
+        "You are a facilitator of deep human connection."
+      );
+      if (result) await sendMessage(`✨ Relationship Spark:\n\n${result}`);
+    } catch (err) {
+      setError("AI is quiet today.");
+    } finally {
+      setIsAiLoading(false);
+      setShowAiMenu(false);
+    }
+  };
 
   useEffect(() => {
     if (!config) {
@@ -65,7 +148,7 @@ const App = () => {
           await signInAnonymously(auth);
         }
       } catch (err) { 
-        setError("AUTH FAILED\n\n1. Ensure 'Anonymous' is enabled in Firebase Console.\n2. Add your Vercel URL to 'Authorized Domains' in Authentication Settings."); 
+        setError("AUTH FAILED\n\nPlease ensure 'Anonymous' sign-in is enabled in your Firebase Console."); 
       }
     };
     initAuth();
@@ -75,17 +158,16 @@ const App = () => {
 
   useEffect(() => {
     if (!user || !db) return;
-
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'messages'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const messagesCol = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+    const q = query(messagesCol);
+    const unsubscribeMsgs = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       msgs.sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
       setMessages(msgs);
     }, (err) => {
-      setError(`PERMISSION DENIED\n\nPath: /artifacts/${appId}\n\nUpdate your Firestore Rules to the Universal version provided.`);
+      setError("PERMISSION DENIED\n\nFirestore Rules are blocking access.");
     });
-
-    return () => unsubscribe();
+    return () => unsubscribeMsgs();
   }, [user]);
 
   useEffect(() => {
@@ -101,7 +183,7 @@ const App = () => {
         timestamp: serverTimestamp()
       });
       setInputValue('');
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("Send Error:", err); }
   };
 
   if (error) return (
@@ -109,7 +191,7 @@ const App = () => {
       <AlertCircle size={48} className="text-rose-500 mb-4" />
       <h2 className="text-xl font-bold text-rose-800 mb-2">Sanctuary Sync Issue</h2>
       <p className="text-rose-600 font-mono text-[10px] whitespace-pre-wrap bg-white p-6 rounded-2xl shadow-sm border border-rose-100 max-w-md">{String(error)}</p>
-      <button onClick={() => window.location.reload()} className="mt-8 px-10 py-3 bg-rose-500 text-white rounded-full font-bold shadow-lg active:scale-95 transition-all">Retry Sync</button>
+      <button onClick={() => window.location.reload()} className="mt-8 px-10 py-3 bg-rose-500 text-white rounded-full font-bold shadow-lg">Retry Sync</button>
     </div>
   );
 
@@ -132,32 +214,82 @@ const App = () => {
             <p className="text-[10px] text-rose-300 uppercase tracking-widest font-bold">Connected & Private</p>
           </div>
         </div>
+        <div className="relative">
+          <button 
+            onClick={() => setShowAiMenu(!showAiMenu)}
+            className={`p-2 rounded-full transition-all ${showAiMenu ? 'bg-rose-500 text-white' : 'text-rose-400 hover:bg-rose-100'}`}
+          >
+            <Sparkles size={24} />
+          </button>
+          
+          {showAiMenu && (
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-rose-100 py-2 z-50 animate-in fade-in slide-in-from-top-2">
+              <button onClick={handleDateIdea} className="w-full text-left px-4 py-3 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2">
+                <CalendarHeart size={14} /> ✨ Date Ideas
+              </button>
+              <button onClick={handleSparkConversation} className="w-full text-left px-4 py-3 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2">
+                <MessageCircleHeart size={14} /> ✨ Relationship Spark
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       <main ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4" style={{ backgroundImage: 'radial-gradient(#ffe4e6 1.5px, transparent 1.5px)', backgroundSize: '24px 24px' }}>
+        {messages.length === 0 && (
+          <div className="h-full flex flex-col items-center justify-center opacity-30 grayscale pointer-events-none">
+             <Heart size={48} className="text-rose-200 mb-2" />
+             <p className="font-serif italic text-rose-400">The beginning of our story...</p>
+          </div>
+        )}
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col max-w-[85%] ${msg.uid === user.uid ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
             <div className={`p-3 rounded-2xl shadow-sm ${msg.uid === user.uid ? 'bg-gradient-to-br from-rose-500 to-pink-500 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-rose-50'}`}>
-              <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{typeof msg.text === 'string' ? msg.text : "..."}</p>
+              <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">
+                {typeof msg.text === 'string' ? msg.text : "..."}
+              </p>
               <div className={`text-[9px] mt-1 opacity-50 ${msg.uid === user.uid ? 'text-right' : 'text-left'}`}>
                  {msg.timestamp?.seconds ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
               </div>
             </div>
           </div>
         ))}
+        {isAiLoading && (
+          <div className="flex items-center gap-2 text-rose-400 bg-white/50 backdrop-blur-sm p-3 rounded-2xl border border-rose-100 w-fit">
+            <RefreshCw className="animate-spin" size={14} />
+            <span className="text-xs font-serif italic">Gemini is weaving magic...</span>
+          </div>
+        )}
       </main>
 
       <footer className="bg-white p-4 border-t border-rose-100 shadow-inner">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <input 
-            type="text" 
-            placeholder="Type your heart out..." 
-            className="flex-1 bg-rose-50/30 border border-rose-100 rounded-2xl py-3 px-5 focus:outline-none focus:ring-2 focus:ring-rose-200 focus:bg-white text-sm" 
-            value={inputValue} 
-            onChange={(e) => setInputValue(e.target.value)} 
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage(inputValue)} 
-          />
-          <button onClick={() => sendMessage(inputValue)} disabled={!inputValue.trim()} className={`p-4 rounded-full shadow-lg ${inputValue.trim() ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-300'}`}><Send size={20} /></button>
+        <div className="max-w-4xl mx-auto flex items-center gap-2">
+          <div className="flex-1 relative">
+            <input 
+              type="text" 
+              placeholder="Type your heart out..." 
+              className="w-full bg-rose-50/30 border border-rose-100 rounded-2xl py-3 px-5 pr-12 focus:outline-none focus:ring-2 focus:ring-rose-200 focus:bg-white transition-all text-sm" 
+              value={inputValue} 
+              onChange={(e) => setInputValue(e.target.value)} 
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage(inputValue)} 
+            />
+            {inputValue.trim() && (
+              <button 
+                onClick={handleSweetify}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-rose-400 hover:text-rose-600 transition-colors"
+                title="Sweetify with ✨ AI"
+              >
+                <Wand2 size={18} />
+              </button>
+            )}
+          </div>
+          <button 
+            onClick={() => sendMessage(inputValue)} 
+            disabled={!inputValue.trim() || isAiLoading} 
+            className={`p-4 rounded-full shadow-lg transition-all active:scale-90 ${inputValue.trim() ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-300'}`}
+          >
+            <Send size={20} />
+          </button>
         </div>
       </footer>
       <style dangerouslySetInnerHTML={{ __html: `
